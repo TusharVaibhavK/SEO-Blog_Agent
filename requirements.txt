@@ -1,0 +1,13 @@
+streamlit
+openai
+requests
+pandas
+python-dotenv
+serpapi
+pytrends
+httpx
+beautifulsoup4
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+fpdf

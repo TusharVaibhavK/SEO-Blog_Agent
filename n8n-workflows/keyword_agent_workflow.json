@@ -1,0 +1,250 @@
+{
+    "name": "SEO Keyword Research Agent",
+    "nodes": [
+        {
+            "parameters": {
+                "path": "/analyze",
+                "responseMode": "onReceived",
+                "options": {}
+            },
+            "id": "a1b2c3d4-1234-5678-90ab-cdef12345678",
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                240,
+                300
+            ],
+            "webhookId": "keyword-analysis-trigger"
+        },
+        {
+            "parameters": {
+                "functionCode": "// Parse incoming webhook data\nconst seedKeyword = $input.first().json.keyword;\nconst numKeywords = $input.first().json.numKeywords || 50;\n\n// Return data for next nodes\nreturn [{\n  json: {\n    seedKeyword,\n    numKeywords,\n    timestamp: new Date().toISOString(),\n    workflowId: 'keyword-research-v1'\n  }\n}];"
+            },
+            "id": "b2c3d4e5-2345-6789-01bc-def234567890",
+            "name": "Parse Input",
+            "type": "n8n-nodes-base.function",
+            "typeVersion": 1,
+            "position": [
+                460,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $env.SEO_AGENT_URL }}/expand-keywords",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "httpHeaderAuth",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "Authorization",
+                            "value": "Bearer {{ $env.OPENAI_API_KEY }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "seed_keyword",
+                            "value": "={{ $json.seedKeyword }}"
+                        },
+                        {
+                            "name": "num_candidates",
+                            "value": "={{ $json.numKeywords * 2 }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "c3d4e5f6-3456-7890-12cd-ef3456789012",
+            "name": "LLM Keyword Expansion",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                680,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "GET",
+                "url": "=https://serpapi.com/search",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "engine",
+                            "value": "google"
+                        },
+                        {
+                            "name": "q",
+                            "value": "={{ $json.keyword }}"
+                        },
+                        {
+                            "name": "api_key",
+                            "value": "={{ $env.SERPAPI_KEY }}"
+                        },
+                        {
+                            "name": "num",
+                            "value": "10"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "d4e5f6g7-4567-8901-23de-f45678901234",
+            "name": "SerpApi - Get SERP Data",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                900,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "functionCode": "// Calculate competition score and metrics\nconst serpData = $input.first().json;\nconst keyword = $input.all()[1].json.keyword;\n\n// Analyze SERP data for competition\nconst organicResults = serpData.organic_results || [];\nconst strongDomains = ['wikipedia.org', 'amazon.com', 'youtube.com', 'forbes.com'];\n\nlet strongDomainCount = 0;\norganicResults.forEach(result => {\n  const domain = result.link ? result.link.split('/')[2] : '';\n  if (strongDomains.some(sd => domain.includes(sd))) {\n    strongDomainCount++;\n  }\n});\n\nconst competitionScore = Math.min(1.0, (strongDomainCount / 5) + (organicResults.length / 20));\n\n// Estimate volume based on keyword characteristics\nconst wordCount = keyword.split(' ').length;\nconst estimatedVolume = Math.max(100, 5000 - (wordCount * 800));\n\nreturn [{\n  json: {\n    keyword,\n    estimated_volume: estimatedVolume,\n    competition_score: Math.round(competitionScore * 1000) / 1000,\n    serp_results_count: serpData.search_information?.total_results || 1000000,\n    strong_domains_count: strongDomainCount,\n    top_domains: organicResults.slice(0, 3).map(r => r.link ? r.link.split('/')[2] : '').filter(d => d)\n  }\n}];"
+            },
+            "id": "e5f6g7h8-5678-9012-34ef-567890123456",
+            "name": "Calculate Metrics",
+            "type": "n8n-nodes-base.function",
+            "typeVersion": 1,
+            "position": [
+                1120,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "functionCode": "// Calculate composite opportunity score\nconst metrics = $input.first().json;\n\nconst alpha = 0.6; // Volume weight\nconst beta = 0.4;  // Competition weight\n\nconst normalizedVolume = Math.min(metrics.estimated_volume / 5000, 1.0);\nconst compositeScore = (alpha * normalizedVolume) - (beta * metrics.competition_score);\n\nreturn [{\n  json: {\n    ...metrics,\n    composite_score: Math.round(compositeScore * 10000) / 10000,\n    analysis_timestamp: new Date().toISOString()\n  }\n}];"
+            },
+            "id": "f6g7h8i9-6789-0123-45fg-678901234567",
+            "name": "Score & Rank",
+            "type": "n8n-nodes-base.function",
+            "typeVersion": 1,
+            "position": [
+                1340,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "mode": "manual",
+                "output": "={{ $json }}",
+                "jsCode": "// Format final output\nconst allResults = $input.all().map(item => item.json);\n\n// Sort by composite score (descending)\nconst sortedResults = allResults.sort((a, b) => b.composite_score - a.composite_score);\n\n// Take top N results\nconst topResults = sortedResults.slice(0, $input.all()[0].json.numKeywords);\n\nreturn [{\n  json: {\n    seed_keyword: $input.all()[0].json.seedKeyword,\n    analysis_date: new Date().toISOString(),\n    total_keywords_analyzed: allResults.length,\n    top_keywords: topResults,\n    summary: {\n      avg_volume: Math.round(topResults.reduce((sum, r) => sum + r.estimated_volume, 0) / topResults.length),\n      avg_competition: Math.round((topResults.reduce((sum, r) => sum + r.competition_score, 0) / topResults.length) * 1000) / 1000,\n      best_opportunity_score: Math.round(Math.max(...topResults.map(r => r.composite_score)) * 10000) / 10000\n    }\n  }\n}];"
+            },
+            "id": "g7h8i9j0-7890-1234-56gh-789012345678",
+            "name": "Format Results",
+            "type": "n8n-nodes-base.function",
+            "typeVersion": 1,
+            "position": [
+                1560,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "responseData": "allEntries",
+                "responseBody": "={{ $json }}",
+                "options": {}
+            },
+            "id": "h8i9j0k1-8901-2345-67hi-890123456789",
+            "name": "Return Response",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                1780,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Parse Input",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Parse Input": {
+            "main": [
+                [
+                    {
+                        "node": "LLM Keyword Expansion",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "LLM Keyword Expansion": {
+            "main": [
+                [
+                    {
+                        "node": "SerpApi - Get SERP Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "SerpApi - Get SERP Data": {
+            "main": [
+                [
+                    {
+                        "node": "Calculate Metrics",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Calculate Metrics": {
+            "main": [
+                [
+                    {
+                        "node": "Score & Rank",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Score & Rank": {
+            "main": [
+                [
+                    {
+                        "node": "Format Results",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Format Results": {
+            "main": [
+                [
+                    {
+                        "node": "Return Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {},
+    "versionId": "1"
+}
